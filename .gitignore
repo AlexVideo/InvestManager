@@ -1,0 +1,30 @@
+# Виртуальное окружение и среда
+.venv/
+venv/
+env/
+
+# Сборка PyInstaller
+build/
+dist/
+*.spec.bak
+
+# Кэш Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Пользовательские данные (базы, документы, вложения) — не коммитить
+data/
+Files/
+*.db
+!data/.gitkeep
+
+# IDE и ОС
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini
