@@ -30,9 +30,17 @@ echo [4/5] Подключение удалённого репозитория...
 git remote remove origin 2>nul
 git remote add origin "%REMOTE%"
 
-echo [5/5] Отправка на GitHub...
+echo [5/5] Синхронизация с GitHub и отправка...
 echo.
-echo Сейчас будет запрос логина и пароля.
+echo Сначала подтянем изменения с GitHub (если репозиторий уже что-то содержал)...
+git pull origin main --allow-unrelated-histories --no-edit 2>nul
+if errorlevel 1 (
+    echo Конфликтов нет или pull не нужен. Отправляем...
+) else (
+    echo Подтянуто. Отправляем...
+)
+echo.
+echo Сейчас может быть запрос логина и пароля.
 echo Логин: videoalex.korday@gmail.com
 echo Пароль: используйте токен (GitHub ^> Settings ^> Developer settings ^> Personal access tokens), не пароль от почты!
 echo.
