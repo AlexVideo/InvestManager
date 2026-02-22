@@ -1,25 +1,27 @@
-# Виртуальное окружение и среда
+# Базы и бэкапы
+*.db
+*.db.*
+*.backup*
+*.xlsx
+
+# Папки с данными
+contracts/
+data/
+Files/
+!data/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
 .venv/
 venv/
 env/
+.env
 
-# Сборка PyInstaller
-build/
+# Сборка
 dist/
+build/
 *.spec.bak
-
-# Кэш Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-
-# Пользовательские данные (базы, документы, вложения) — не коммитить
-data/
-Files/
-*.db
-!data/.gitkeep
 
 # IDE и ОС
 .idea/
