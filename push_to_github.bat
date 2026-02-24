@@ -23,7 +23,10 @@ git config user.name "Alex"
 echo [3/5] Добавление файлов и коммит...
 git add .
 git status -s
-git commit -m "Invest Manager 0.5.1 — полный проект" 2>nul || git commit -m "Обновление проекта"
+set "VER=0.0.0"
+for /f "delims=" %%v in ('python -c "import version; print(version.APP_VERSION)" 2^>nul') do set "VER=%%v"
+if "%VER%"=="" for /f "delims=" %%v in ('".venv\Scripts\python.exe" -c "import version; print(version.APP_VERSION)" 2^>nul') do set "VER=%%v"
+git commit -m "Invest Manager %VER%" 2>nul || git commit -m "Обновление проекта"
 git branch -M main 2>nul
 
 echo [4/5] Подключение удалённого репозитория...

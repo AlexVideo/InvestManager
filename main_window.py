@@ -46,9 +46,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if db.get_db_type() == "services":
             self._db_type = "services"
             self._build_services_ui()
+            self._restore_window_geometry()
             return
         self._db_type = "invest"
         self._build_invest_ui()
+        self._restore_window_geometry()
 
     def _build_services_ui(self):
         """Интерфейс для базы «Услуги и работы»: список договоров, акты в карточке."""
@@ -145,12 +147,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         
 
-        # Таблица: 11 столбцов (+ Заложено изначально, Исполн. %)
+        # Таблица: 12 столбцов (+ Статус закупки)
         self.TABLE_HEADERS = [
             "Название", "Рудник", "Участок", "Заложено", "Имеется", "Необходимо",
-            "Маркетинг", "Договор", "Остаток", "Исполн. %", "Вне бюджета"
+            "Маркетинг", "Договор", "Остаток", "Исполн. %", "Вне бюджета", "Статус закупки"
         ]
-        self.table = QtWidgets.QTableWidget(0, 11)
+        self.table = QtWidgets.QTableWidget(0, 12)
         self.table.setHorizontalHeaderLabels(self.TABLE_HEADERS)
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -158,10 +160,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.table.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
         self._sort_column = -1
         self._sort_order = QtCore.Qt.SortOrder.AscendingOrder
-        self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Stretch)
-        for c in range(1, 11):
-            self.table.horizontalHeader().setSectionResizeMode(c, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setStretchLastSection(False)
+        for c in range(12):
+            self.table.horizontalHeader().setSectionResizeMode(c, QtWidgets.QHeaderView.ResizeMode.Interactive)
+        self._load_column_widths()
+        self.table.horizontalHeader().sectionResized.connect(self._on_column_resized)
         self.table.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._on_ctx_menu)
         self.table.setAlternatingRowColors(True)
@@ -218,7 +221,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.filter_out_combo.currentIndexChanged.connect(self._apply_filter)
         filter_row.addWidget(self.filter_out_combo)
 
-        reset_all_btn = QtWidgets.QPushButton("Сбросить все фильтры")
+        self.filter_status_combo = QtWidgets.QComboBox()
+        self.filter_status_combo.setMinimumWidth(220)
+        self.filter_status_combo.addItem("—")
+        for s in db.PROCUREMENT_STATUSES:
+            self.filter_status_combo.addItem(s)
+        self.filter_status_combo.currentIndexChanged.connect(self._apply_filter)
+        filter_row.addWidget(QtWidgets.QLabel("Статус закупки:"))
+        filter_row.addWidget(self.filter_status_combo)
+
+        reset_all_btn = QtWidgets.QPushButton("🔄")
+        reset_all_btn.setToolTip("Сбросить все фильтры")
         reset_all_btn.clicked.connect(self._reset_all_filters)
         filter_row.addWidget(reset_all_btn)
 
@@ -255,7 +268,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_db_title()  # ← ДОБАВИТЬ
         self._show_opened_toast()
 
+    def _restore_window_geometry(self):
+        """Восстановить положение, размер и состояние окна (развёрнуто/нормальное) из настроек."""
+        settings = QSettings()
+        geom = settings.value("mainwindow/geometry")
+        if geom is not None:
+            self.restoreGeometry(geom)
+        maximized = settings.value("mainwindow/maximized", False)
+        if maximized in (True, "true", 1, "1"):
+            self.showMaximized()
 
+    def closeEvent(self, event):
+        """Сохранить положение, размер и состояние окна перед закрытием."""
+        settings = QSettings()
+        settings.setValue("mainwindow/geometry", self.saveGeometry())
+        settings.setValue("mainwindow/maximized", self.isMaximized())
+        event.accept()
 
     def refresh(self):
         rows = db.list_projects()
@@ -266,7 +294,7 @@ class MainWindow(QtWidgets.QMainWindow):
         total_need = 0.0
         total_have = 0.0
         over_budget_count = 0
-        for r, (pid, name, base_budget, comment, created_at, out_of_budget, mine_id, section_id) in enumerate(rows):
+        for r, (pid, name, base_budget, comment, created_at, out_of_budget, mine_id, section_id, procurement_status) in enumerate(rows):
             status = db.compute_project_status(pid)
             mine_name = db.get_mine_name(mine_id) if mine_id else ""
             section_name = db.get_section_name(section_id) if section_id else ""
@@ -313,6 +341,9 @@ class MainWindow(QtWidgets.QMainWindow):
             out_item.setText("")
             out_item.setData(QtCore.Qt.ItemDataRole.UserRole, pid)
 
+            status_item = QtWidgets.QTableWidgetItem(procurement_status if procurement_status else "—")
+            status_item.setFlags(status_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
+
             for it in (budget_item, have_item, need_item, marketing_item, contract_item, diff_item, exec_pct_item):
                 it.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
 
@@ -327,6 +358,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.table.setItem(r, 8, diff_item)
             self.table.setItem(r, 9, exec_pct_item)
             self.table.setItem(r, 10, out_item)
+            self.table.setItem(r, 11, status_item)
 
             # Подсветка строки по stage
             stage = status["stage"]
@@ -367,7 +399,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 item.setBackground(QColor(color_hex))
 
     def _get_sort_key(self, row: int, column: int):
-        """Ключ для сортировки. Столбцы 0,1,2 — текст; 3–9 — числа; 10 — галочка."""
+        """Ключ для сортировки. Столбцы 0,1,2,11 — текст; 3–9 — числа; 10 — галочка."""
         item = self.table.item(row, column)
         if not item:
             return (0, 0.0) if column in (3, 4, 5, 6, 7, 8, 9) else ("",)
@@ -449,7 +481,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_filter()
 
     def _reset_all_filters(self):
-        """Сбрасываем все фильтры: название, все диапазоны, вне бюджета."""
+        """Сбрасываем все фильтры: название, все диапазоны, вне бюджета, статус закупки."""
         self.filter_name_edit.clear()
         for i in range(7):
             self.filter_from_vals[i] = None
@@ -457,6 +489,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.filter_out_combo.blockSignals(True)
         self.filter_out_combo.setCurrentIndex(0)
         self.filter_out_combo.blockSignals(False)
+        self.filter_status_combo.blockSignals(True)
+        self.filter_status_combo.setCurrentIndex(0)
+        self.filter_status_combo.blockSignals(False)
         self._apply_filter()
 
     def _apply_filter(self):
@@ -500,6 +535,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 item_out = self.table.item(r, 10)
                 if not item_out or item_out.checkState() != QtCore.Qt.CheckState.Checked:
                     show = False
+            if show:
+                status_filter = (self.filter_status_combo.currentText() or "").strip()
+                if status_filter and status_filter != "—":
+                    item_status = self.table.item(r, 11)
+                    cell_status = (item_status.text() if item_status else "").strip()
+                    if cell_status != status_filter:
+                        show = False
             self.table.setRowHidden(r, not show)
         self._update_status_label()
 
@@ -579,17 +621,41 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _apply_column_settings(self):
         """Применить порядок и видимость столбцов из QSettings (только режим Инвест)."""
-        if not hasattr(self, "table") or self.table.columnCount() != 11:
+        if not hasattr(self, "table") or self.table.columnCount() != 12:
             return
         order = load_column_order()
         visible = load_column_visible()
-        for logical in range(11):
+        for logical in range(12):
             self.table.setColumnHidden(logical, not visible[logical])
         header = self.table.horizontalHeader()
-        for to_visual in range(11):
+        for to_visual in range(12):
             from_visual = header.visualIndex(order[to_visual])
             if from_visual != to_visual:
                 header.moveSection(from_visual, to_visual)
+
+    MAIN_TABLE_WIDTH_PREFIX = "main_table/col_width_"
+
+    _DEFAULT_COL_WIDTHS = (220, 100, 100, 90, 90, 90, 90, 90, 90, 70, 90, 140)  # Название, Рудник, ... Статус закупки
+
+    def _load_column_widths(self):
+        """Восстановить ширину столбцов главной таблицы из QSettings (при первом запуске — разумные по умолчанию)."""
+        if not hasattr(self, "table") or self.table.columnCount() != 12:
+            return
+        settings = QSettings()
+        for c in range(12):
+            w = settings.value(self.MAIN_TABLE_WIDTH_PREFIX + str(c))
+            if w is not None:
+                try:
+                    self.table.setColumnWidth(c, int(w))
+                except (ValueError, TypeError):
+                    self.table.setColumnWidth(c, self._DEFAULT_COL_WIDTHS[c])
+            else:
+                self.table.setColumnWidth(c, self._DEFAULT_COL_WIDTHS[c])
+
+    def _on_column_resized(self, logical_index: int, old_size: int, new_size: int):
+        """Сохранить ширину столбца главной таблицы в QSettings."""
+        if 0 <= logical_index < 12:
+            QSettings().setValue(self.MAIN_TABLE_WIDTH_PREFIX + str(logical_index), new_size)
 
     def open_project_card(self, row: int, col: int):
         item = self.table.item(row, 0)
@@ -661,13 +727,13 @@ class MainWindow(QtWidgets.QMainWindow):
     
     def _get_export_data(self) -> tuple[list[str], list[list]]:
         """Видимые столбцы в визуальном порядке, видимые строки в текущей сортировке. Возвращает (headers, rows)."""
-        if not hasattr(self, "table") or self.table.columnCount() != 11:
+        if not hasattr(self, "table") or self.table.columnCount() != 12:
             return [], []
         header = self.table.horizontalHeader()
         # Видимые столбцы в порядке отображения (слева направо)
         headers = []
         logical_cols = []
-        for visual in range(11):
+        for visual in range(12):
             logical = header.logicalIndex(visual)
             if self.table.isColumnHidden(logical):
                 continue

@@ -57,6 +57,13 @@ QDialog {
 QMessageBox {
     background: #202020;
 }
+QToolTip {
+    background-color: #2a2a2a;
+    color: #e6e6e6;
+    border: 1px solid #505050;
+    padding: 6px;
+    font-size: 12pt;
+}
 """
 
 def apply_dark_theme(widget: QtWidgets.QWidget):

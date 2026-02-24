@@ -99,7 +99,7 @@ def export_to_excel(xlsx_path: str) -> str:
     summary_rows = []
 
     projects = db.list_projects()
-    for pid, name, base_budget, comment, created_at, out_of_budget, mine_id, section_id in projects:
+    for pid, name, base_budget, comment, created_at, out_of_budget, mine_id, section_id, _ in projects:
         st = db.compute_project_status(pid)
         mine_name = db.get_mine_name(mine_id) if mine_id else ""
         section_name = db.get_section_name(section_id) if section_id else ""

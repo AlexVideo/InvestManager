@@ -7,11 +7,11 @@ from about_dialog import AboutDialog
 # Логические столбцы таблицы проектов (индекс = позиция в списке по умолчанию)
 COLUMN_IDS = [
     "name", "mine", "section", "budget", "have", "need",
-    "marketing", "contract", "remainder", "exec_pct", "out_of_budget"
+    "marketing", "contract", "remainder", "exec_pct", "out_of_budget", "procurement_status"
 ]
 COLUMN_LABELS = [
     "Название", "Рудник", "Участок", "Заложено", "Имеется", "Необходимо",
-    "Маркетинг", "Договор", "Остаток", "Исполн. %", "Вне бюджета"
+    "Маркетинг", "Договор", "Остаток", "Исполн. %", "Вне бюджета", "Статус закупки"
 ]
 
 SETTINGS_ORDER_KEY = "invest_columns/order"
@@ -19,21 +19,25 @@ SETTINGS_VISIBLE_KEY = "invest_columns/visible"
 
 
 def load_column_order() -> list[int]:
-    """Порядок логических индексов (0..10) слева направо."""
+    """Порядок логических индексов (0..11) слева направо. Всегда 12 элементов (дополняем при старых настройках)."""
     s = QSettings()
     val = s.value(SETTINGS_ORDER_KEY)
     if val is None:
-        return list(range(11))
+        return list(range(12))
     if isinstance(val, list):
-        return [int(x) for x in val if isinstance(x, (int, str)) and str(x).isdigit()][:11]
-    s_str = (val or "").strip()
-    if not s_str:
-        return list(range(11))
-    try:
-        out = [int(x.strip()) for x in s_str.split(",") if x.strip().isdigit()][:11]
-        return out if len(out) == 11 else list(range(11))
-    except (ValueError, AttributeError):
-        return list(range(11))
+        out = [int(x) for x in val if isinstance(x, (int, str)) and str(x).isdigit()][:12]
+    else:
+        s_str = (val or "").strip()
+        if not s_str:
+            return list(range(12))
+        try:
+            out = [int(x.strip()) for x in s_str.split(",") if x.strip().isdigit()][:12]
+        except (ValueError, AttributeError):
+            return list(range(12))
+    # Дополняем до 12 (если сохранялось 11 столбцов до добавления «Статус закупки»)
+    while len(out) < 12:
+        out.append(len(out))
+    return out[:12]
 
 
 def save_column_order(order: list[int]) -> None:
@@ -42,21 +46,25 @@ def save_column_order(order: list[int]) -> None:
 
 
 def load_column_visible() -> list[bool]:
-    """Видимость по логическому индексу (0..10)."""
+    """Видимость по логическому индексу (0..11). Всегда 12 элементов (дополняем при старых настройках)."""
     s = QSettings()
     val = s.value(SETTINGS_VISIBLE_KEY)
     if val is None:
-        return [True] * 11
+        return [True] * 12
     if isinstance(val, list):
-        return [bool(int(x)) if str(x).isdigit() else True for x in val][:11]
-    s_str = (val or "").strip()
-    if not s_str:
-        return [True] * 11
-    try:
-        out = [x.strip() in ("1", "true", "yes") for x in s_str.replace(";", ",").split(",")][:11]
-        return (out + [True] * 11)[:11]
-    except (ValueError, AttributeError):
-        return [True] * 11
+        out = [bool(int(x)) if str(x).isdigit() else True for x in val][:12]
+    else:
+        s_str = (val or "").strip()
+        if not s_str:
+            return [True] * 12
+        try:
+            out = [x.strip() in ("1", "true", "yes") for x in s_str.replace(";", ",").split(",")][:12]
+        except (ValueError, AttributeError):
+            return [True] * 12
+    # Дополняем до 12 (старые настройки могли сохранить 11)
+    while len(out) < 12:
+        out.append(True)
+    return out[:12]
 
 
 def save_column_visible(visible: list[bool]) -> None:

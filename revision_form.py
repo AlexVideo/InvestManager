@@ -64,7 +64,7 @@ class RevisionDialog(QtWidgets.QDialog):
     # ------- helpers
     def _fill_sources(self):
         self.source_combo.clear()
-        for pid, name, budget, comment, created_at, _out, _mine, _section in db.list_projects():
+        for pid, name, budget, comment, created_at, _out, _mine, _section, _status in db.list_projects():
             if pid == self.target_project_id:
                 continue
             self.source_combo.addItem(name, pid)

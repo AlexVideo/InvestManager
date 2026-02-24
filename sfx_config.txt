@@ -1,5 +1,5 @@
 ;!@Install@!UTF-8!
-Title="Invest Manager 0.4"
+Title="Invest Manager 0.6.0"
 BeginPrompt="Распаковать и запустить Invest Manager?"
 RunProgram="InvestManager.exe"
 ;!@InstallEnd@!

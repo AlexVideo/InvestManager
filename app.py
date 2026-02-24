@@ -37,6 +37,9 @@ def main():
     if os.path.exists(icon_file):
         app.setWindowIcon(QIcon(icon_file))
 
+    # Подсказки в цветах приложения: тёмный фон, светлый текст, рамка
+    app.setStyleSheet("QToolTip { background-color: #2a2a2a; color: #e6e6e6; border: 1px solid #505050; padding: 6px; font-size: 12pt; }")
+
     # --- Выбор активной БД ДО любых вызовов db.* ---
     settings = QSettings()
     last_db = settings.value("db/last_path", "", str)

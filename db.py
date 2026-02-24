@@ -34,7 +34,31 @@ _recalc_dirs()
 import shutil
 
 # Версия схемы БД: при открытии старой базы выполняются миграции от текущей версии до SCHEMA_VERSION
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
+
+# Статус закупки (порядок возрастания). Пустое значение = «—».
+PROCUREMENT_STATUSES = [
+    "готово ТЗ",
+    "отправлена служебка на маркетинг",
+    "получен маркетинг",
+    "отправлена служебка на ревизию",
+    "отправлена служебка на изменение ГПЗ",
+    "внесено изменение в ГПЗ",
+    "объявлен тендер",
+    "тендер состоялся",
+    "заключен договор",
+    "поставка состоялась",
+]
+
+def _procurement_status_index(status: str | None) -> int:
+    """Индекс статуса в PROCUREMENT_STATUSES (0..9) или -1 если пусто/неизвестен."""
+    if not status or not str(status).strip():
+        return -1
+    s = str(status).strip()
+    for i, v in enumerate(PROCUREMENT_STATUSES):
+        if v == s:
+            return i
+    return -1
 
 
 def _get_schema_version(cur) -> int:
@@ -86,8 +110,31 @@ def _migrate_1_to_2(cur):
             cur.execute(f"ALTER TABLE {table} ADD COLUMN added_by TEXT DEFAULT ''")
 
 
+def _migrate_2_to_3(cur):
+    """Версия 3: procurement_status в projects (статус закупки)."""
+    cur.execute("PRAGMA table_info(projects)")
+    columns = [row[1] for row in cur.fetchall()]
+    if "procurement_status" not in columns:
+        cur.execute("ALTER TABLE projects ADD COLUMN procurement_status TEXT")
+
+
+def _migrate_3_to_4(cur):
+    """Версия 4: таблица загрузок файлов по проекту."""
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS project_file_uploads(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            file_path TEXT NOT NULL,
+            date TEXT NOT NULL,
+            comment TEXT DEFAULT '',
+            added_by TEXT DEFAULT '',
+            FOREIGN KEY(project_id) REFERENCES projects(id)
+        )
+    """)
+
+
 # Список миграций: индекс i — переход с версии i на i+1
-_MIGRATIONS = [_migrate_0_to_1, _migrate_1_to_2]
+_MIGRATIONS = [_migrate_0_to_1, _migrate_1_to_2, _migrate_2_to_3, _migrate_3_to_4]
 
 
 def _run_migrations(con):
@@ -318,6 +365,7 @@ def _create_invest_schema(cur):
         out_of_budget INTEGER NOT NULL DEFAULT 0,
         mine_id INTEGER,
         section_id INTEGER,
+        procurement_status TEXT,
         FOREIGN KEY(mine_id) REFERENCES mines(id),
         FOREIGN KEY(section_id) REFERENCES sections(id)
     )""")
@@ -365,6 +413,16 @@ def _create_invest_schema(cur):
         added_by TEXT DEFAULT '',
         FOREIGN KEY(source_project_id) REFERENCES projects(id),
         FOREIGN KEY(target_project_id) REFERENCES projects(id)
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS project_file_uploads(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        file_path TEXT NOT NULL,
+        date TEXT NOT NULL,
+        comment TEXT DEFAULT '',
+        added_by TEXT DEFAULT '',
+        FOREIGN KEY(project_id) REFERENCES projects(id)
     )""")
 
 def _create_services_schema(cur):
@@ -512,7 +570,7 @@ def delete_mine(mine_id: int):
 def list_projects():
     con = connect()
     cur = con.cursor()
-    cur.execute("""SELECT id, name, budget, comment, created_at, out_of_budget, mine_id, section_id
+    cur.execute("""SELECT id, name, budget, comment, created_at, out_of_budget, mine_id, section_id, procurement_status
                    FROM projects ORDER BY id ASC""")
     rows = cur.fetchall()
     con.close()
@@ -521,20 +579,22 @@ def list_projects():
         ob = r[5] if len(r) > 5 else 0
         mid = r[6] if len(r) > 6 else None
         sid = r[7] if len(r) > 7 else None
-        result.append((r[0], r[1], r[2], r[3], r[4], 1 if ob else 0, mid, sid))
+        pstatus = (r[8].strip() if len(r) > 8 and r[8] else None) or None
+        result.append((r[0], r[1], r[2], r[3], r[4], 1 if ob else 0, mid, sid, pstatus))
     return result
 
 def get_project(project_id: int):
     con = connect()
     cur = con.cursor()
-    cur.execute("""SELECT id, name, budget, comment, created_at, out_of_budget, mine_id, section_id
+    cur.execute("""SELECT id, name, budget, comment, created_at, out_of_budget, mine_id, section_id, procurement_status
                    FROM projects WHERE id=?""", (project_id,))
     r = cur.fetchone()
     con.close()
     if not r:
         return None
     ob = r[5] if len(r) > 5 else 0
-    return (r[0], r[1], r[2], r[3], r[4], 1 if ob else 0, r[6] if len(r) > 6 else None, r[7] if len(r) > 7 else None)
+    pstatus = (r[8].strip() if len(r) > 8 and r[8] else None) or None
+    return (r[0], r[1], r[2], r[3], r[4], 1 if ob else 0, r[6] if len(r) > 6 else None, r[7] if len(r) > 7 else None, pstatus)
 
 def create_project(name: str, budget: float, comment: str | None, out_of_budget: bool = False, mine_id: int | None = None, section_id: int | None = None):
     con = connect()
@@ -558,6 +618,29 @@ def update_project_out_of_budget(project_id: int, out_of_budget: bool):
     cur.execute("UPDATE projects SET out_of_budget=? WHERE id=?", (1 if out_of_budget else 0, project_id))
     con.commit()
     con.close()
+
+def update_project_procurement_status(project_id: int, status: str | None):
+    """Установить статус закупки проекта (None или пустая строка = сброс)."""
+    con = connect()
+    cur = con.cursor()
+    val = (status.strip() if status and str(status).strip() else None)
+    cur.execute("UPDATE projects SET procurement_status=? WHERE id=?", (val, project_id))
+    con.commit()
+    con.close()
+
+def _ensure_procurement_status_at_least(project_id: int, cur, min_status: str):
+    """Если текущий статус проекта ниже min_status — установить min_status. cur — курсор в уже открытом соединении."""
+    cur.execute("SELECT procurement_status FROM projects WHERE id=?", (project_id,))
+    row = cur.fetchone()
+    if not row:
+        return
+    current = (row[0].strip() if row[0] else None) or None
+    idx_current = _procurement_status_index(current)
+    idx_min = _procurement_status_index(min_status)
+    if idx_min < 0:
+        return
+    if idx_current < idx_min:
+        cur.execute("UPDATE projects SET procurement_status=? WHERE id=?", (min_status, project_id))
 
 # -------- Corrections
 def record_correction(project_id: int, new_budget: float, date: str, note: str | None, added_by: str | None = None):
@@ -609,6 +692,7 @@ def record_marketing(project_id: int, amount: float, date: str, file_path: str |
     who = (added_by or get_windows_user()) or ""
     cur.execute("INSERT INTO marketing(project_id, amount, date, file_path, note, added_by) VALUES(?,?,?,?,?,?)",
                 (project_id, float(amount), date, file_path, note or "", who))
+    _ensure_procurement_status_at_least(project_id, cur, "получен маркетинг")
     con.commit()
     con.close()
 
@@ -654,6 +738,7 @@ def record_contract(project_id: int, amount: float, date: str, contractor: str |
     who = (added_by or get_windows_user()) or ""
     cur.execute("INSERT INTO contracts(project_id, amount, date, contractor, file_path, note, added_by) VALUES(?,?,?,?,?,?,?)",
                 (project_id, float(amount), date, contractor, file_path, note or "", who))
+    _ensure_procurement_status_at_least(project_id, cur, "заключен договор")
     con.commit()
     con.close()
 
@@ -728,6 +813,7 @@ def record_revision(source_project_id: int, target_project_id: int, amount: floa
             INSERT INTO revisions(source_project_id, target_project_id, amount, date, note, added_by)
             VALUES(?,?,?,?,?,?)
         """, (source_project_id, target_project_id, amt, date, note or "", who))
+        _ensure_procurement_status_at_least(target_project_id, cur, "отправлена служебка на ревизию")
 
         con.commit()
     finally:
@@ -756,6 +842,41 @@ def delete_revision(rev_id: int):
     cur.execute("DELETE FROM revisions WHERE id=?", (rev_id,))
     con.commit()
     con.close()
+
+
+def record_project_file_upload(project_id: int, file_path: str, date: str, comment: str, added_by: str):
+    """Добавить запись о загруженном файле (файл уже скопирован в папку проекта)."""
+    con = connect()
+    cur = con.cursor()
+    cur.execute(
+        "INSERT INTO project_file_uploads (project_id, file_path, date, comment, added_by) VALUES (?,?,?,?,?)",
+        (project_id, (file_path or "").strip(), date or "", (comment or "").strip(), (added_by or "").strip())
+    )
+    con.commit()
+    con.close()
+
+
+def delete_project_file_upload(upload_id: int, delete_file: bool):
+    """Удалить запись о загрузке. Если delete_file=True — удалить файл с диска (если доступен)."""
+    con = connect()
+    cur = con.cursor()
+    cur.execute("SELECT file_path FROM project_file_uploads WHERE id=?", (upload_id,))
+    row = cur.fetchone()
+    if not row:
+        con.close()
+        return
+    stored_path = (row[0] or "").strip()
+    if delete_file and stored_path:
+        full = resolve_file_path(stored_path)
+        if full and os.path.isfile(full):
+            try:
+                os.remove(full)
+            except OSError:
+                pass
+    cur.execute("DELETE FROM project_file_uploads WHERE id=?", (upload_id,))
+    con.commit()
+    con.close()
+
 
 # -------- Aggregations
 def _sum(cur, query, args):
@@ -843,6 +964,12 @@ def get_project_timeline(project_id: int) -> list[dict]:
         rows.append({"id": r["id"], "kind": "revision_out", "date": r["date"], "type": t,
                      "amount": float(r["amount"]), "note": r["note"] or "", "file_path": None, "sign": "-", "added_by": (r["added_by"] or "")})
 
+    # загрузки файлов (без суммы)
+    cur.execute("SELECT id, date, file_path, comment, added_by FROM project_file_uploads WHERE project_id=?", (project_id,))
+    for r in cur.fetchall():
+        rows.append({"id": r["id"], "kind": "file_upload", "date": r["date"], "type": "Загрузка файла",
+                     "amount": None, "note": r["comment"] or "", "file_path": r["file_path"], "added_by": (r["added_by"] or "")})
+
     con.close()
     rows.sort(key=lambda x: (x["date"] or "", x["type"]))
     return rows
@@ -871,12 +998,14 @@ def get_project_activity_counts(project_id: int) -> dict:
     ctr = cur.fetchone()[0]
     cur.execute("SELECT COUNT(*) FROM revisions WHERE source_project_id=? OR target_project_id=?", (project_id, project_id))
     rev = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM project_file_uploads WHERE project_id=?", (project_id,))
+    fu = cur.fetchone()[0]
     con.close()
-    return {"corrections": corr, "marketing": mkt, "contracts": ctr, "revisions": rev}
+    return {"corrections": corr, "marketing": mkt, "contracts": ctr, "revisions": rev, "file_uploads": fu}
 
 def can_delete_project(project_id: int) -> bool:
     c = get_project_activity_counts(project_id)
-    return (c["corrections"] + c["marketing"] + c["contracts"] + c["revisions"]) == 0
+    return (c["corrections"] + c["marketing"] + c["contracts"] + c["revisions"] + c["file_uploads"]) == 0
 
 def update_project_name(project_id: int, new_name: str):
     con = connect(); cur = con.cursor()
@@ -892,9 +1021,11 @@ def delete_project(project_id: int):
             f"Корректировок: {counts['corrections']}, "
             f"Маркетингов: {counts['marketing']}, "
             f"Договоров: {counts['contracts']}, "
-            f"Ревизий: {counts['revisions']}."
+            f"Ревизий: {counts['revisions']}, "
+            f"Загрузок файлов: {counts['file_uploads']}."
         )
     con = connect(); cur = con.cursor()
+    cur.execute("DELETE FROM project_file_uploads WHERE project_id=?", (project_id,))
     cur.execute("DELETE FROM projects WHERE id=?", (project_id,))
     con.commit(); con.close()
 
