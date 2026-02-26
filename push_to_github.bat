@@ -29,6 +29,9 @@ if "%VER%"=="" for /f "delims=" %%v in ('".venv\Scripts\python.exe" -c "import v
 git commit -m "Invest Manager %VER%" 2>nul || git commit -m "Обновление проекта"
 git branch -M main 2>nul
 
+echo Создание тега v%VER% (для отката к версии: git checkout v%VER%)...
+git tag -a "v%VER%" -m "Release %VER%" 2>nul
+
 echo [4/5] Подключение удалённого репозитория...
 git remote remove origin 2>nul
 git remote add origin "%REMOTE%"
@@ -48,10 +51,19 @@ echo Логин: videoalex.korday@gmail.com
 echo Пароль: используйте токен (GitHub ^> Settings ^> Developer settings ^> Personal access tokens), не пароль от почты!
 echo.
 git push -u origin main
-
 if errorlevel 1 (
     echo.
-    echo Если push не прошёл — выполните вручную в этой папке: git push -u origin main
+    echo Если push не прошёл — выполните вручную: git push -u origin main
     echo И введите логин и токен при запросе.
+    pause
+    exit /b 1
 )
+
+echo.
+echo Отправка тегов (чтобы на GitHub можно было откатиться к версии)...
+git push origin --tags
+
+echo.
+echo Готово. Откат к предыдущей версии: git checkout v0.5.1
+echo Или на GitHub: Code ^> вкладка веток ^> Tags ^> выбрать версию.
 pause
