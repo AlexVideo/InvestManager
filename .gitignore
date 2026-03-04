@@ -1,0 +1,32 @@
+# Базы и бэкапы
+*.db
+*.db.*
+*.backup*
+*.xlsx
+
+# Папки с данными
+contracts/
+data/
+Files/
+!data/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+.env
+
+# Сборка
+dist/
+build/
+*.spec.bak
+
+# IDE и ОС
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini
