@@ -60,8 +60,8 @@ if errorlevel 1 (
 )
 
 echo.
-echo Отправка тегов (чтобы на GitHub можно было откатиться к версии)...
-git push origin --tags
+echo Отправка тега v%VER% на GitHub...
+git push origin v%VER% 2>nul
 
 echo.
 echo Готово. Откат к предыдущей версии: git checkout v0.5.1

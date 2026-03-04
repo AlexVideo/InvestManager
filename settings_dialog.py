@@ -1,110 +1,49 @@
-# settings_dialog.py — настройки столбцов таблицы (режим «Инвест»), внешний вид и «О программе»
+# settings_dialog.py — выпадающая панель настроек: внешний вид, столбцы, рудники, «О программе»
 from PyQt6 import QtWidgets, QtCore
-from PyQt6.QtCore import QSettings
-from theme import apply_dialog_theme, set_theme_params, get_dark_qss
+from PyQt6.QtCore import QPoint, QRect
+from theme import set_theme_params, get_dark_qss, apply_dark_theme
 from about_dialog import AboutDialog
 import app_settings
+from column_settings_dialog import ColumnSettingsDialog
 
-# Логические столбцы таблицы проектов (индекс = позиция в списке по умолчанию)
-COLUMN_IDS = [
-    "name", "mine", "section", "budget", "have", "need",
-    "marketing", "contract", "remainder", "exec_pct", "out_of_budget", "procurement_status"
-]
-COLUMN_LABELS = [
-    "Название", "Рудник", "Участок", "Заложено", "Имеется", "Необходимо",
-    "Маркетинг", "Договор", "Остаток", "Исполн. %", "Вне бюджета", "Статус закупки"
-]
-
-SETTINGS_ORDER_KEY = "invest_columns/order"
-SETTINGS_VISIBLE_KEY = "invest_columns/visible"
+from column_settings_dialog import load_column_order, load_column_visible
 
 
-def load_column_order() -> list[int]:
-    """Порядок логических индексов (0..11) слева направо. Всегда 12 элементов (дополняем при старых настройках)."""
-    s = QSettings()
-    val = s.value(SETTINGS_ORDER_KEY)
-    if val is None:
-        return list(range(12))
-    if isinstance(val, list):
-        out = [int(x) for x in val if isinstance(x, (int, str)) and str(x).isdigit()][:12]
+def _apply_scale_and_theme(scale: str, main_win=None):
+    """Применить масштаб и перерисовать тему."""
+    new_data = app_settings.load_app_settings()
+    new_data["ui_scale"] = scale
+    app_settings.save_app_settings(new_data)
+    if scale in app_settings.PRESETS:
+        font_pt, btn_pad, tooltip_pt = app_settings.PRESETS[scale]
+        set_theme_params(font_size_pt=font_pt, button_padding=btn_pad, tooltip_font_size_pt=tooltip_pt)
     else:
-        s_str = (val or "").strip()
-        if not s_str:
-            return list(range(12))
-        try:
-            out = [int(x.strip()) for x in s_str.split(",") if x.strip().isdigit()][:12]
-        except (ValueError, AttributeError):
-            return list(range(12))
-    # Дополняем до 12 (если сохранялось 11 столбцов до добавления «Статус закупки»)
-    while len(out) < 12:
-        out.append(len(out))
-    return out[:12]
+        set_theme_params(
+            font_size_pt=new_data.get("font_size_pt", 14),
+            button_padding=new_data.get("button_padding", "6px 10px"),
+            tooltip_font_size_pt=new_data.get("tooltip_font_size_pt", 12),
+        )
+    qss = get_dark_qss()
+    app = QtWidgets.QApplication.instance()
+    if app:
+        app.setStyleSheet(qss)
+    if main_win:
+        main_win.setStyleSheet(qss)
 
 
-def save_column_order(order: list[int]) -> None:
-    s = QSettings()
-    s.setValue(SETTINGS_ORDER_KEY, [int(x) for x in order])
-
-
-def load_column_visible() -> list[bool]:
-    """Видимость по логическому индексу (0..11). Всегда 12 элементов (дополняем при старых настройках)."""
-    s = QSettings()
-    val = s.value(SETTINGS_VISIBLE_KEY)
-    if val is None:
-        return [True] * 12
-    if isinstance(val, list):
-        out = [bool(int(x)) if str(x).isdigit() else True for x in val][:12]
-    else:
-        s_str = (val or "").strip()
-        if not s_str:
-            return [True] * 12
-        try:
-            out = [x.strip() in ("1", "true", "yes") for x in s_str.replace(";", ",").split(",")][:12]
-        except (ValueError, AttributeError):
-            return [True] * 12
-    # Дополняем до 12 (старые настройки могли сохранить 11)
-    while len(out) < 12:
-        out.append(True)
-    return out[:12]
-
-
-def save_column_visible(visible: list[bool]) -> None:
-    s = QSettings()
-    s.setValue(SETTINGS_VISIBLE_KEY, [1 if v else 0 for v in visible])
-
-
-class ColumnItemWidget(QtWidgets.QWidget):
-    """Одна строка списка: галочка + название + кнопки Вверх/Вниз."""
-    def __init__(self, logical_index: int, label: str, parent=None):
-        super().__init__(parent)
-        self.logical_index = logical_index
-        self.chk = QtWidgets.QCheckBox("Показывать")
-        self.chk.setChecked(True)
-        self.label = QtWidgets.QLabel(label)
-        self.btn_up = QtWidgets.QPushButton("▲")
-        self.btn_up.setFixedWidth(28)
-        self.btn_down = QtWidgets.QPushButton("▼")
-        self.btn_down.setFixedWidth(28)
-        layout = QtWidgets.QHBoxLayout(self)
-        layout.setContentsMargins(0, 2, 0, 2)
-        layout.addWidget(self.chk)
-        layout.addWidget(self.label, 1)
-        layout.addWidget(self.btn_up)
-        layout.addWidget(self.btn_down)
-
-
-class SettingsDialog(QtWidgets.QDialog):
-    """Диалог настроек: порядок и видимость столбцов, блок «О программе»."""
-    def __init__(self, parent=None, invest_mode: bool = True):
-        super().__init__(parent)
-        self.setWindowTitle("Настройки")
+class SettingsPopup(QtWidgets.QFrame):
+    """Выпадающая панель настроек: комбобокс «Внешний вид» и кнопки (без надписей над ними). Закрывается при нажатии любой кнопки; комбобокс не закрывает."""
+    def __init__(self, parent=None, anchor_btn: QtWidgets.QPushButton = None, invest_mode: bool = True):
+        super().__init__(parent, QtCore.Qt.WindowType.Popup | QtCore.Qt.WindowType.FramelessWindowHint)
+        self._anchor_btn = anchor_btn
         self.invest_mode = invest_mode
-        apply_dialog_theme(self)
-
+        self.setFrameStyle(QtWidgets.QFrame.Shape.StyledPanel)
+        self.setLineWidth(1)
+        apply_dark_theme(self)
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setSpacing(6)
+        layout.setContentsMargins(10, 10, 10, 10)
 
-        # Внешний вид: пресет для мелких экранов
-        layout.addWidget(QtWidgets.QLabel("<b>Внешний вид</b>"))
         self.ui_scale_combo = QtWidgets.QComboBox()
         self.ui_scale_combo.addItem("Обычный", "normal")
         self.ui_scale_combo.addItem("Компактный (мелкий экран)", "compact")
@@ -114,104 +53,76 @@ class SettingsDialog(QtWidgets.QDialog):
         idx = self.ui_scale_combo.findData(scale)
         if idx >= 0:
             self.ui_scale_combo.setCurrentIndex(idx)
+        self.ui_scale_combo.currentIndexChanged.connect(self._on_scale_changed)
         layout.addWidget(self.ui_scale_combo)
 
         if invest_mode:
-            layout.addWidget(QtWidgets.QLabel("<b>Столбцы таблицы</b>"))
-            self.order: list[int] = load_column_order()
-            self.visible: list[bool] = load_column_visible()
-            self.row_widgets: list[ColumnItemWidget] = []
+            columns_btn = QtWidgets.QPushButton("Порядок и видимость столбцов…")
+            columns_btn.clicked.connect(self._open_column_settings)
+            layout.addWidget(columns_btn)
 
-            self.list_widget = QtWidgets.QWidget()
-            self.list_layout = QtWidgets.QVBoxLayout(self.list_widget)
-            self.list_layout.setContentsMargins(0, 0, 0, 0)
-            for i, logical_idx in enumerate(self.order):
-                label = COLUMN_LABELS[logical_idx]
-                w = ColumnItemWidget(logical_idx, label)
-                w.chk.setChecked(self.visible[logical_idx])
-                w.btn_up.clicked.connect(lambda checked=False, pos=i: self._move(pos, -1))
-                w.btn_down.clicked.connect(lambda checked=False, pos=i: self._move(pos, 1))
-                self.row_widgets.append(w)
-                self.list_layout.addWidget(w)
-            layout.addWidget(self.list_widget)
-
-        layout.addWidget(QtWidgets.QLabel("<b>Рудники и участки</b>"))
         mines_btn = QtWidgets.QPushButton("Рудники и участки…")
-        mines_btn.clicked.connect(self._show_mines_sections)
+        mines_btn.clicked.connect(self._open_mines_sections)
         layout.addWidget(mines_btn)
 
-        layout.addWidget(QtWidgets.QLabel("<b>О программе</b>"))
         about_btn = QtWidgets.QPushButton("Открыть «О программе»…")
-        about_btn.clicked.connect(self._show_about)
+        about_btn.clicked.connect(self._open_about)
         layout.addWidget(about_btn)
 
-        bb = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel
-        )
-        bb.accepted.connect(self._accept)
-        bb.rejected.connect(self.reject)
-        layout.addWidget(bb)
-
-    def _move(self, visual_pos: int, delta: int):
-        new_pos = visual_pos + delta
-        if new_pos < 0 or new_pos >= len(self.order):
-            return
-        self._save_visible_from_widgets()
-        self.order[visual_pos], self.order[new_pos] = self.order[new_pos], self.order[visual_pos]
-        self._rebuild_list()
-
-    def _save_visible_from_widgets(self):
-        for w in self.row_widgets:
-            self.visible[w.logical_index] = w.chk.isChecked()
-
-    def _rebuild_list(self):
-        # Удаляем виджеты из лэйаута безопасно (takeAt, иначе itemAt может стать None)
-        while self.list_layout.count():
-            item = self.list_layout.takeAt(0)
-            if item and item.widget():
-                item.widget().setParent(None)
-        self.row_widgets.clear()
-        for i, logical_idx in enumerate(self.order):
-            label = COLUMN_LABELS[logical_idx]
-            w = ColumnItemWidget(logical_idx, label)
-            w.chk.setChecked(self.visible[logical_idx])
-            w.btn_up.clicked.connect(lambda checked=False, pos=i: self._move(pos, -1))
-            w.btn_down.clicked.connect(lambda checked=False, pos=i: self._move(pos, 1))
-            self.row_widgets.append(w)
-            self.list_layout.addWidget(w)
-
-    def _show_mines_sections(self):
-        from mines_sections_dialog import MinesSectionsDialog
-        MinesSectionsDialog(self).exec()
-
-    def _show_about(self):
-        AboutDialog(self).exec()
-
-    def _accept(self):
-        # Сохранить настройки внешнего вида в data/app_settings.json и переприменить тему
+    def _on_scale_changed(self):
         scale = self.ui_scale_combo.currentData() or "normal"
-        new_data = app_settings.load_app_settings()
-        new_data["ui_scale"] = scale
-        app_settings.save_app_settings(new_data)
-        if scale in app_settings.PRESETS:
-            font_pt, btn_pad, tooltip_pt = app_settings.PRESETS[scale]
-            set_theme_params(font_size_pt=font_pt, button_padding=btn_pad, tooltip_font_size_pt=tooltip_pt)
-        else:
-            set_theme_params(
-                font_size_pt=new_data.get("font_size_pt", 14),
-                button_padding=new_data.get("button_padding", "6px 10px"),
-                tooltip_font_size_pt=new_data.get("tooltip_font_size_pt", 12),
-            )
-        qss = get_dark_qss()
-        app = QtWidgets.QApplication.instance()
-        if app:
-            app.setStyleSheet(qss)
         main_win = self.parent()
-        if main_win:
-            main_win.setStyleSheet(qss)
+        _apply_scale_and_theme(scale, main_win)
 
-        if self.invest_mode:
-            self._save_visible_from_widgets()
-            save_column_order(self.order)
-            save_column_visible(self.visible)
-        self.accept()
+    def _close_popup_and(self, callback):
+        self.close()
+        QtCore.QTimer.singleShot(0, callback)
+
+    def _open_column_settings(self):
+        main_win = self.parent()
+        def open_():
+            ColumnSettingsDialog(main_win).exec()
+            if main_win and hasattr(main_win, "_apply_column_settings"):
+                main_win._apply_column_settings()
+        self._close_popup_and(open_)
+
+    def _open_mines_sections(self):
+        main_win = self.parent()
+        def open_():
+            from mines_sections_dialog import MinesSectionsDialog
+            MinesSectionsDialog(main_win).exec()
+        self._close_popup_and(open_)
+
+    def _open_about(self):
+        main_win = self.parent()
+        def open_():
+            AboutDialog(main_win).exec()
+        self._close_popup_and(open_)
+
+    def show_popup(self):
+        self.adjustSize()
+        if self._anchor_btn and self._anchor_btn.isVisible():
+            btn = self._anchor_btn
+            btn_rect = QRect(btn.mapToGlobal(QPoint(0, 0)), btn.size())
+            screen = btn.screen().availableGeometry() if btn.screen() else None
+            if not screen:
+                from PyQt6.QtGui import QGuiApplication
+                screen = QGuiApplication.primaryScreen().availableGeometry()
+            # Выравнивание по правой границе кнопки
+            x = btn_rect.right() - self.width()
+            y = btn_rect.bottom()
+            # Не выходить за левую границу экрана
+            if x < screen.left():
+                x = screen.left()
+            # Не выходить за правую границу экрана
+            if x + self.width() > screen.right():
+                x = screen.right() - self.width()
+            # Не выходить за нижнюю границу — при необходимости показать выше кнопки
+            if y + self.height() > screen.bottom():
+                y = btn_rect.top() - self.height()
+            if y < screen.top():
+                y = screen.top()
+            if y + self.height() > screen.bottom():
+                y = screen.bottom() - self.height()
+            self.move(x, y)
+        self.show()

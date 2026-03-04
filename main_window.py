@@ -11,7 +11,7 @@ from utils import money, to_float, format_number_for_edit
 from theme import apply_dark_theme
 from add_project_form import AddProjectDialog
 from about_dialog import AboutDialog
-from settings_dialog import SettingsDialog, load_column_order, load_column_visible
+from settings_dialog import SettingsPopup, load_column_order, load_column_visible
 from project_card import ProjectCard  # ⬅ импортируй вверху
 from bulk_import import BulkImportDialog
 
@@ -347,6 +347,20 @@ class MainWindow(QtWidgets.QMainWindow):
             for it in (budget_item, have_item, need_item, marketing_item, contract_item, diff_item, exec_pct_item):
                 it.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
 
+            # Подсказки с полным содержимым (при наведении, если не помещается)
+            name_item.setToolTip(name)
+            mine_item.setToolTip(mine_name)
+            section_item.setToolTip(section_name)
+            budget_item.setToolTip(money(budget_val))
+            have_item.setToolTip(money(status["have"]))
+            need_item.setToolTip(money(status["need"]))
+            marketing_item.setToolTip(money(status["marketing_amount"]) if status["marketing_amount"] is not None else "—")
+            contract_item.setToolTip(money(status["contract_amount"]) if status["contract_amount"] is not None else "—")
+            diff_item.setToolTip(money(status["diff"]))
+            exec_pct_item.setToolTip(exec_pct_item.text())
+            out_item.setToolTip("Вне бюджета" if out_of_budget else "По бюджету")
+            status_item.setToolTip(procurement_status if procurement_status else "—")
+
             self.table.setItem(r, 0, name_item)
             self.table.setItem(r, 1, mine_item)
             self.table.setItem(r, 2, section_item)
@@ -614,10 +628,8 @@ class MainWindow(QtWidgets.QMainWindow):
         AboutDialog(self).exec()
 
     def _open_settings(self):
-        dlg = SettingsDialog(self, invest_mode=(self._db_type == "invest"))
-        if dlg.exec():
-            if self._db_type == "invest":
-                self._apply_column_settings()
+        popup = SettingsPopup(self, self.about_btn, invest_mode=(self._db_type == "invest"))
+        popup.show_popup()
 
     def _apply_column_settings(self):
         """Применить порядок и видимость столбцов из QSettings (только режим Инвест)."""
@@ -674,14 +686,32 @@ class MainWindow(QtWidgets.QMainWindow):
         return item.data(QtCore.Qt.ItemDataRole.UserRole) if item else None
 
     def _on_ctx_menu(self, pos):
-        pid = self._current_project_id()
-        if pid is None:
-            return
+        index = self.table.indexAt(pos)
+        row, col = index.row(), index.column()
         menu = QtWidgets.QMenu(self)
-        act_rename = menu.addAction("Переименовать…")
-        act_delete = menu.addAction("Удалить статью…")
+        act_copy = None
+        if row >= 0 and col >= 0:
+            act_copy = menu.addAction("Скопировать ячейку")
+        pid = self._current_project_id()
+        act_rename = None
+        act_delete = None
+        if pid is not None:
+            if act_copy is not None:
+                menu.addSeparator()
+            act_rename = menu.addAction("Переименовать…")
+            act_delete = menu.addAction("Удалить статью…")
         action = menu.exec(self.table.viewport().mapToGlobal(pos))
-        if action == act_rename:
+        if action == act_copy and row >= 0 and col >= 0:
+            item = self.table.item(row, col)
+            if item:
+                if col == 10:
+                    text = "Вне бюджета" if item.checkState() == QtCore.Qt.CheckState.Checked else "По бюджету"
+                else:
+                    text = item.text() or ""
+                app = QtWidgets.QApplication.instance()
+                if app and app.clipboard():
+                    app.clipboard().setText(text)
+        elif action == act_rename:
             self._rename_project(pid)
         elif action == act_delete:
             self._delete_project(pid)
