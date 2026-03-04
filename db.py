@@ -1012,6 +1012,13 @@ def update_project_name(project_id: int, new_name: str):
     cur.execute("UPDATE projects SET name=? WHERE id=?", (new_name.strip(), project_id))
     con.commit(); con.close()
 
+def update_project_comment(project_id: int, comment: str | None):
+    con = connect()
+    cur = con.cursor()
+    cur.execute("UPDATE projects SET comment=? WHERE id=?", (comment or "", project_id))
+    con.commit()
+    con.close()
+
 def delete_project(project_id: int):
     """Удаляет статью, ЕСЛИ по ней не было действий; иначе бросает ValueError."""
     if not can_delete_project(project_id):

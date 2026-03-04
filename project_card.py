@@ -67,6 +67,22 @@ class ProjectCard(QtWidgets.QDialog):
         summary.addWidget(QtWidgets.QLabel("Статус закупки:"), 5, 0)
         summary.addWidget(self.status_combo, 5, 1)
 
+        summary.addWidget(QtWidgets.QLabel("Комментарий к статье:"), 6, 0)
+        self.comment_edit = QtWidgets.QPlainTextEdit()
+        self.comment_edit.setPlaceholderText("Комментарий к статье (можно менять)")
+        self.comment_edit.setMaximumHeight(60)
+        self.comment_edit.setPlainText((p[3] or "").strip() if p and len(p) > 3 else "")
+        self.comment_btn = QtWidgets.QPushButton("Сохранить комментарий")
+        self.comment_btn.setMaximumWidth(160)
+        self.comment_btn.clicked.connect(self._save_comment)
+        comment_row = QtWidgets.QVBoxLayout()
+        comment_row.setContentsMargins(0, 0, 0, 0)
+        comment_row.addWidget(self.comment_edit)
+        comment_row.addWidget(self.comment_btn)
+        comment_w = QtWidgets.QWidget()
+        comment_w.setLayout(comment_row)
+        summary.addWidget(comment_w, 6, 1)
+
         # 6 видимых + 2 скрытых (kind, id)
         self.table = QtWidgets.QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels(["Дата", "Тип", "Сумма", "Комментарий", "Файл", "Кто внёс", "_kind", "_id"])
@@ -150,6 +166,9 @@ class ProjectCard(QtWidgets.QDialog):
         val = self.status_combo.currentData()
         db.update_project_procurement_status(self.project_id, val)
 
+    def _save_comment(self):
+        db.update_project_comment(self.project_id, self.comment_edit.toPlainText().strip())
+
     def refresh(self):
         pr = db.get_project(self.project_id)
         base = float(pr[2]) if pr else 0.0
@@ -174,6 +193,7 @@ class ProjectCard(QtWidgets.QDialog):
         self.have_lbl.setText(f"Имеется: {money(st['have'])}")
         self.need_lbl.setText(f"Необходимо: {money(st['need'])}")
         self.diff_lbl.setText(f"Остаток: {money(st['diff'])}")
+        self.comment_edit.setPlainText((pr[3] or "").strip() if pr and len(pr) > 3 else "")
 
         self.need_lbl.setStyleSheet("color:#9be69b; font-size:14pt;" if st['need'] <= st['have'] else "color:#ff7a7a; font-size:14pt;")
         self.diff_lbl.setStyleSheet("color:#9be69b; font-size:14pt;" if st['diff'] >= 0 else "color:#ff7a7a; font-size:14pt;")
