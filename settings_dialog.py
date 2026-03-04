@@ -1,8 +1,9 @@
-# settings_dialog.py — настройки столбцов таблицы (режим «Инвест») и «О программе»
+# settings_dialog.py — настройки столбцов таблицы (режим «Инвест»), внешний вид и «О программе»
 from PyQt6 import QtWidgets, QtCore
 from PyQt6.QtCore import QSettings
-from theme import apply_dialog_theme
+from theme import apply_dialog_theme, set_theme_params, get_dark_qss
 from about_dialog import AboutDialog
+import app_settings
 
 # Логические столбцы таблицы проектов (индекс = позиция в списке по умолчанию)
 COLUMN_IDS = [
@@ -102,6 +103,19 @@ class SettingsDialog(QtWidgets.QDialog):
 
         layout = QtWidgets.QVBoxLayout(self)
 
+        # Внешний вид: пресет для мелких экранов
+        layout.addWidget(QtWidgets.QLabel("<b>Внешний вид</b>"))
+        self.ui_scale_combo = QtWidgets.QComboBox()
+        self.ui_scale_combo.addItem("Обычный", "normal")
+        self.ui_scale_combo.addItem("Компактный (мелкий экран)", "compact")
+        self.ui_scale_combo.addItem("Мелкий (маленький экран)", "small")
+        current = app_settings.load_app_settings()
+        scale = current.get("ui_scale", "normal")
+        idx = self.ui_scale_combo.findData(scale)
+        if idx >= 0:
+            self.ui_scale_combo.setCurrentIndex(idx)
+        layout.addWidget(self.ui_scale_combo)
+
         if invest_mode:
             layout.addWidget(QtWidgets.QLabel("<b>Столбцы таблицы</b>"))
             self.order: list[int] = load_column_order()
@@ -174,6 +188,28 @@ class SettingsDialog(QtWidgets.QDialog):
         AboutDialog(self).exec()
 
     def _accept(self):
+        # Сохранить настройки внешнего вида в data/app_settings.json и переприменить тему
+        scale = self.ui_scale_combo.currentData() or "normal"
+        new_data = app_settings.load_app_settings()
+        new_data["ui_scale"] = scale
+        app_settings.save_app_settings(new_data)
+        if scale in app_settings.PRESETS:
+            font_pt, btn_pad, tooltip_pt = app_settings.PRESETS[scale]
+            set_theme_params(font_size_pt=font_pt, button_padding=btn_pad, tooltip_font_size_pt=tooltip_pt)
+        else:
+            set_theme_params(
+                font_size_pt=new_data.get("font_size_pt", 14),
+                button_padding=new_data.get("button_padding", "6px 10px"),
+                tooltip_font_size_pt=new_data.get("tooltip_font_size_pt", 12),
+            )
+        qss = get_dark_qss()
+        app = QtWidgets.QApplication.instance()
+        if app:
+            app.setStyleSheet(qss)
+        main_win = self.parent()
+        if main_win:
+            main_win.setStyleSheet(qss)
+
         if self.invest_mode:
             self._save_visible_from_widgets()
             save_column_order(self.order)

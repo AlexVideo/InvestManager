@@ -4,8 +4,10 @@ import os
 from PyQt6 import QtWidgets
 from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import QSettings
+import app_settings
 import db
 from main_window import MainWindow
+from theme import set_theme_params, get_dark_qss
 
 def app_dir() -> str:
     """Папка приложения (рядом с .py в dev и рядом с .exe в сборке)."""
@@ -24,6 +26,7 @@ def resource_path(*parts) -> str:
 def main():
     # Рабочая директория = папка приложения (чтобы data/ создавалась рядом с exe)
     os.chdir(app_dir())
+    app_settings.set_app_dir(app_dir())
 
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName("Invest Manager")
@@ -37,8 +40,19 @@ def main():
     if os.path.exists(icon_file):
         app.setWindowIcon(QIcon(icon_file))
 
-    # Подсказки в цветах приложения: тёмный фон, светлый текст, рамка
-    app.setStyleSheet("QToolTip { background-color: #2a2a2a; color: #e6e6e6; border: 1px solid #505050; padding: 6px; font-size: 12pt; }")
+    # Настройки внешнего вида из data/app_settings.json
+    settings_data = app_settings.load_app_settings()
+    scale = settings_data.get("ui_scale", "normal")
+    if scale in app_settings.PRESETS:
+        font_pt, btn_pad, tooltip_pt = app_settings.PRESETS[scale]
+        set_theme_params(font_size_pt=font_pt, button_padding=btn_pad, tooltip_font_size_pt=tooltip_pt)
+    else:
+        set_theme_params(
+            font_size_pt=settings_data.get("font_size_pt", 14),
+            button_padding=settings_data.get("button_padding", "6px 10px"),
+            tooltip_font_size_pt=settings_data.get("tooltip_font_size_pt", 12),
+        )
+    app.setStyleSheet(get_dark_qss())
 
     # --- Выбор активной БД ДО любых вызовов db.* ---
     settings = QSettings()
